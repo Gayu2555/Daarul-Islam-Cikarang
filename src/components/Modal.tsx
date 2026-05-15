@@ -1,7 +1,6 @@
-import React, { useState } from "react";
 import { motion } from "motion/react";
 import { X, Check } from "lucide-react";
-import type { Student, Subject, Teacher, Class } from "../types";
+import type { Subject, Teacher, Class } from "../types";
 
 interface ModalProps {
   type: "student" | "teacher" | "subject" | "template" | null;
@@ -10,7 +9,6 @@ interface ModalProps {
   handleCreate: (e: React.FormEvent) => void;
   formData: any;
   setFormData: (data: any) => void;
-  students: Student[];
   subjects: Subject[];
   teachers: Teacher[];
   classes: Class[];
@@ -309,7 +307,6 @@ const Modal: React.FC<ModalProps> = ({
   handleCreate,
   formData,
   setFormData,
-  students,
   subjects,
   teachers,
   classes,

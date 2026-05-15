@@ -19,7 +19,25 @@ interface ClassSubject {
   subjects: { name: string; code?: string };
 }
 
+interface ScheduleSlot {
+  id: string; // temporary id untuk key
+  subject_id: string;
+  teacher_id: string;
+  start_time: string;
+  end_time: string;
+  room: string;
+}
+
 const DAYS = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
+
+const emptySlot = (): ScheduleSlot => ({
+  id: crypto.randomUUID(),
+  subject_id: "",
+  teacher_id: "",
+  start_time: "",
+  end_time: "",
+  room: "",
+});
 
 export default function ClassDetail({ classData, onBack }: Props) {
   const [students, setStudents] = useState<Student[]>([]);
@@ -45,17 +63,10 @@ export default function ClassDetail({ classData, onBack }: Props) {
   const [selectedStudentId, setSelectedStudentId] = useState("");
   const [savingStudent, setSavingStudent] = useState(false);
 
-  // schedule state
-  const [isAddingSchedule, setIsAddingSchedule] = useState(false);
+  // schedule state — per day editing
+  const [editingDay, setEditingDay] = useState<string | null>(null);
+  const [daySlots, setDaySlots] = useState<ScheduleSlot[]>([emptySlot()]);
   const [savingSchedule, setSavingSchedule] = useState(false);
-  const [scheduleForm, setScheduleForm] = useState({
-    subject_id: "",
-    teacher_id: "",
-    day_of_week: "Senin",
-    start_time: "",
-    end_time: "",
-    room: "",
-  });
   const [allTeachers, setAllTeachers] = useState<
     { id: string; name: string }[]
   >([]);
@@ -81,31 +92,26 @@ export default function ClassDetail({ classData, onBack }: Props) {
           .select("*")
           .eq("class_id", classData.id)
           .order("name"),
-
         supabase
           .from("class_subjects")
           .select("*, subjects(name, code)")
           .eq("class_id", classData.id)
           .order("created_at", { ascending: false }),
-
         supabase
           .from("curriculum_templates")
           .select("*, curriculum_template_subjects(subject_id, subjects(name))")
           .order("name"),
-
         supabase
           .from("students")
           .select("*")
           .is("class_id", null)
           .order("name"),
-
         supabase
           .from("class_schedules")
           .select("*, subjects(name, code), teachers(name)")
           .eq("class_id", classData.id)
           .order("day_of_week")
           .order("start_time"),
-
         supabase.from("teachers").select("id, name").order("name"),
       ]);
 
@@ -173,9 +179,6 @@ export default function ClassDetail({ classData, onBack }: Props) {
     }
   };
 
-  // ============================================
-  // KELUARKAN SISWA
-  // ============================================
   const handleRemoveStudent = async (studentId: string) => {
     if (!supabase) return;
     if (
@@ -196,9 +199,6 @@ export default function ClassDetail({ classData, onBack }: Props) {
     }
   };
 
-  // ============================================
-  // HAPUS MAPEL
-  // ============================================
   const handleRemoveSubject = async (classSubjectId: string) => {
     if (!supabase) return;
     if (!confirm("Hapus mata pelajaran dari kelas ini?")) return;
@@ -215,38 +215,63 @@ export default function ClassDetail({ classData, onBack }: Props) {
   };
 
   // ============================================
-  // TAMBAH JADWAL
+  // SCHEDULE: open day editor
   // ============================================
-  const handleAddSchedule = async (e: React.FormEvent) => {
+  const openDayEditor = (day: string) => {
+    setEditingDay(day);
+    setDaySlots([emptySlot()]);
+  };
+
+  const closeDayEditor = () => {
+    setEditingDay(null);
+    setDaySlots([emptySlot()]);
+  };
+
+  const addSlot = () => {
+    setDaySlots((prev) => [...prev, emptySlot()]);
+  };
+
+  const removeSlot = (id: string) => {
+    setDaySlots((prev) => prev.filter((s) => s.id !== id));
+  };
+
+  const updateSlot = (id: string, field: keyof ScheduleSlot, value: string) => {
+    setDaySlots((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, [field]: value } : s)),
+    );
+  };
+
+  // ============================================
+  // SCHEDULE: save day slots (bulk insert)
+  // ============================================
+  const handleSaveDaySchedule = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!supabase) return;
+    if (!supabase || !editingDay) return;
+
+    const validSlots = daySlots.filter(
+      (s) => s.subject_id && s.start_time && s.end_time,
+    );
+    if (validSlots.length === 0) {
+      alert("Isi minimal satu sesi dengan mapel, jam mulai, dan jam selesai.");
+      return;
+    }
+
     setSavingSchedule(true);
     try {
-      const insertData: any = {
+      const rows = validSlots.map((s) => ({
         class_id: classData.id,
-        subject_id: scheduleForm.subject_id,
-        day_of_week: scheduleForm.day_of_week,
-        start_time: scheduleForm.start_time,
-        end_time: scheduleForm.end_time,
-      };
-      if (scheduleForm.teacher_id)
-        insertData.teacher_id = scheduleForm.teacher_id;
-      if (scheduleForm.room) insertData.room = scheduleForm.room;
+        day_of_week: editingDay,
+        subject_id: s.subject_id,
+        ...(s.teacher_id ? { teacher_id: s.teacher_id } : {}),
+        start_time: s.start_time,
+        end_time: s.end_time,
+        ...(s.room ? { room: s.room } : {}),
+      }));
 
-      const { error } = await supabase
-        .from("class_schedules")
-        .insert([insertData]);
+      const { error } = await supabase.from("class_schedules").insert(rows);
       if (error) throw error;
 
-      setIsAddingSchedule(false);
-      setScheduleForm({
-        subject_id: "",
-        teacher_id: "",
-        day_of_week: "Senin",
-        start_time: "",
-        end_time: "",
-        room: "",
-      });
+      closeDayEditor();
       fetchAll();
     } catch (err: any) {
       alert("Gagal menyimpan jadwal: " + err.message);
@@ -256,11 +281,11 @@ export default function ClassDetail({ classData, onBack }: Props) {
   };
 
   // ============================================
-  // HAPUS JADWAL
+  // SCHEDULE: delete single sesi
   // ============================================
   const handleDeleteSchedule = async (id: string) => {
     if (!supabase) return;
-    if (!confirm("Hapus jadwal ini?")) return;
+    if (!confirm("Hapus sesi ini?")) return;
     try {
       const { error } = await supabase
         .from("class_schedules")
@@ -611,158 +636,179 @@ export default function ClassDetail({ classData, onBack }: Props) {
 
           {/* TAB: JADWAL */}
           {activeTab === "schedule" && (
-            <div className="space-y-4">
-              <div className="flex justify-end">
-                <button
-                  onClick={() => setIsAddingSchedule(true)}
-                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors text-sm font-medium shadow-sm"
-                >
-                  + Tambah Jadwal
-                </button>
-              </div>
-
-              {/* Form tambah jadwal */}
-              {isAddingSchedule && (
-                <div className="bg-white border border-indigo-200 rounded-2xl p-5">
-                  <p className="text-sm font-bold text-slate-700 mb-4">
-                    Tambah Jadwal Pelajaran
+            <div className="space-y-3">
+              {/* Pilih hari untuk tambah jadwal */}
+              {!editingDay && (
+                <div className="bg-white border border-slate-100 rounded-2xl p-5">
+                  <p className="text-sm font-bold text-slate-700 mb-3">
+                    Tambah jadwal untuk hari:
                   </p>
-                  <form onSubmit={handleAddSchedule} className="space-y-3">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {/* Mata pelajaran */}
-                      <div>
-                        <label className="text-xs text-slate-500 mb-1 block">
-                          Mata Pelajaran *
-                        </label>
+                  <div className="flex flex-wrap gap-2">
+                    {DAYS.map((day) => (
+                      <button
+                        key={day}
+                        onClick={() => openDayEditor(day)}
+                        className="px-4 py-2 rounded-xl text-sm font-medium border border-slate-200 text-slate-600 hover:bg-indigo-50 hover:border-indigo-300 hover:text-indigo-700 transition-colors"
+                      >
+                        {day}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Form multi-slot per hari */}
+              {editingDay && (
+                <div className="bg-white border border-indigo-200 rounded-2xl overflow-hidden">
+                  <div className="px-5 py-4 bg-indigo-50 border-b border-indigo-100 flex items-center justify-between">
+                    <p className="text-sm font-bold text-indigo-700">
+                      Jadwal hari {editingDay}
+                    </p>
+                    <button
+                      onClick={closeDayEditor}
+                      className="text-indigo-400 hover:text-indigo-700 text-xs transition-colors"
+                    >
+                      Batal
+                    </button>
+                  </div>
+
+                  <form
+                    onSubmit={handleSaveDaySchedule}
+                    className="p-5 space-y-3"
+                  >
+                    {/* Header kolom */}
+                    <div className="hidden sm:grid grid-cols-[1fr_1fr_90px_90px_1fr_32px] gap-2 px-1">
+                      {[
+                        "Mata Pelajaran",
+                        "Guru",
+                        "Mulai",
+                        "Selesai",
+                        "Ruangan",
+                        "",
+                      ].map((h) => (
+                        <p
+                          key={h}
+                          className="text-xs text-slate-400 font-medium"
+                        >
+                          {h}
+                        </p>
+                      ))}
+                    </div>
+
+                    {/* Slot rows */}
+                    {daySlots.map((slot, idx) => (
+                      <div
+                        key={slot.id}
+                        className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_90px_90px_1fr_32px] gap-2 items-start p-3 sm:p-0 bg-slate-50 sm:bg-transparent rounded-xl sm:rounded-none"
+                      >
+                        {/* Label mobile */}
+                        <p className="sm:hidden text-xs font-bold text-slate-500 mb-1">
+                          Sesi {idx + 1}
+                        </p>
+
+                        {/* Mapel */}
                         <select
                           required
-                          value={scheduleForm.subject_id}
+                          value={slot.subject_id}
                           onChange={(e) =>
-                            setScheduleForm((f) => ({
-                              ...f,
-                              subject_id: e.target.value,
-                            }))
+                            updateSlot(slot.id, "subject_id", e.target.value)
                           }
-                          className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                          aria-label="Mata pelajaran"
                         >
-                          <option value="">-- Pilih Mapel --</option>
+                          <option value="">-- Mapel --</option>
                           {classSubjects.map((cs) => (
                             <option key={cs.subject_id} value={cs.subject_id}>
                               {cs.subjects.name}
                             </option>
                           ))}
                         </select>
-                      </div>
 
-                      {/* Guru */}
-                      <div>
-                        <label className="text-xs text-slate-500 mb-1 block">
-                          Guru Pengajar
-                        </label>
+                        {/* Guru */}
                         <select
-                          value={scheduleForm.teacher_id}
+                          value={slot.teacher_id}
                           onChange={(e) =>
-                            setScheduleForm((f) => ({
-                              ...f,
-                              teacher_id: e.target.value,
-                            }))
+                            updateSlot(slot.id, "teacher_id", e.target.value)
                           }
-                          className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                          aria-label="Guru"
                         >
-                          <option value="">-- Pilih Guru --</option>
+                          <option value="">-- Guru --</option>
                           {allTeachers.map((t) => (
                             <option key={t.id} value={t.id}>
                               {t.name}
                             </option>
                           ))}
                         </select>
-                      </div>
 
-                      {/* Hari */}
-                      <div>
-                        <label className="text-xs text-slate-500 mb-1 block">
-                          Hari *
-                        </label>
-                        <select
-                          value={scheduleForm.day_of_week}
+                        {/* Jam mulai */}
+                        <input
+                          required
+                          type="time"
+                          value={slot.start_time}
                           onChange={(e) =>
-                            setScheduleForm((f) => ({
-                              ...f,
-                              day_of_week: e.target.value,
-                            }))
+                            updateSlot(slot.id, "start_time", e.target.value)
                           }
-                          className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                        >
-                          {DAYS.map((d) => (
-                            <option key={d} value={d}>
-                              {d}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
+                          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                        />
 
-                      {/* Ruangan */}
-                      <div>
-                        <label className="text-xs text-slate-500 mb-1 block">
-                          Ruangan
-                        </label>
+                        {/* Jam selesai */}
+                        <input
+                          required
+                          type="time"
+                          value={slot.end_time}
+                          onChange={(e) =>
+                            updateSlot(slot.id, "end_time", e.target.value)
+                          }
+                          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                        />
+
+                        {/* Ruangan */}
                         <input
                           type="text"
-                          placeholder="Contoh: Lab IPA, Ruang 12"
-                          value={scheduleForm.room}
+                          placeholder="Ruangan"
+                          value={slot.room}
                           onChange={(e) =>
-                            setScheduleForm((f) => ({
-                              ...f,
-                              room: e.target.value,
-                            }))
+                            updateSlot(slot.id, "room", e.target.value)
                           }
-                          className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
                         />
-                      </div>
 
-                      {/* Jam mulai */}
-                      <div>
-                        <label className="text-xs text-slate-500 mb-1 block">
-                          Jam Mulai *
-                        </label>
-                        <input
-                          required
-                          type="time"
-                          value={scheduleForm.start_time}
-                          onChange={(e) =>
-                            setScheduleForm((f) => ({
-                              ...f,
-                              start_time: e.target.value,
-                            }))
-                          }
-                          className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                        />
+                        {/* Hapus slot */}
+                        <button
+                          type="button"
+                          onClick={() => removeSlot(slot.id)}
+                          disabled={daySlots.length === 1}
+                          className="w-8 h-8 flex items-center justify-center text-slate-300 hover:text-red-500 disabled:opacity-0 transition-colors rounded-lg mt-0.5"
+                          aria-label="Hapus sesi"
+                        >
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            viewBox="0 0 24 24"
+                            className="w-4 h-4"
+                            fill="currentColor"
+                          >
+                            <path d="M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12zm3.5-9h1v7h-1V10zm5 0h1v7h-1V10z" />
+                            <path d="M15.5 4l-1-1h-5l-1 1H5v2h14V4h-3.5z" />
+                          </svg>
+                        </button>
                       </div>
+                    ))}
 
-                      {/* Jam selesai */}
-                      <div>
-                        <label className="text-xs text-slate-500 mb-1 block">
-                          Jam Selesai *
-                        </label>
-                        <input
-                          required
-                          type="time"
-                          value={scheduleForm.end_time}
-                          onChange={(e) =>
-                            setScheduleForm((f) => ({
-                              ...f,
-                              end_time: e.target.value,
-                            }))
-                          }
-                          className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                        />
-                      </div>
-                    </div>
+                    {/* Tambah slot */}
+                    <button
+                      type="button"
+                      onClick={addSlot}
+                      className="w-full py-2 border border-dashed border-slate-300 rounded-xl text-sm text-slate-400 hover:text-indigo-600 hover:border-indigo-300 transition-colors"
+                    >
+                      + Tambah sesi lagi
+                    </button>
 
-                    <div className="flex gap-2 justify-end pt-1">
+                    {/* Actions */}
+                    <div className="flex justify-end gap-2 pt-2">
                       <button
                         type="button"
-                        onClick={() => setIsAddingSchedule(false)}
+                        onClick={closeDayEditor}
                         className="px-4 py-2 text-sm text-slate-500 hover:text-slate-800 transition-colors"
                       >
                         Batal
@@ -770,17 +816,19 @@ export default function ClassDetail({ classData, onBack }: Props) {
                       <button
                         type="submit"
                         disabled={savingSchedule}
-                        className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors text-sm font-medium disabled:opacity-50 shadow-sm"
+                        className="px-5 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors text-sm font-medium disabled:opacity-50 shadow-sm"
                       >
-                        {savingSchedule ? "Menyimpan..." : "Simpan Jadwal"}
+                        {savingSchedule
+                          ? "Menyimpan..."
+                          : `Simpan Jadwal ${editingDay}`}
                       </button>
                     </div>
                   </form>
                 </div>
               )}
 
-              {/* Jadwal grouped by day */}
-              {schedules.length === 0 && !isAddingSchedule ? (
+              {/* Existing schedules grouped by day */}
+              {schedules.length === 0 && !editingDay ? (
                 <div className="bg-white border border-slate-100 rounded-2xl p-16 text-center">
                   <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-3 text-slate-400">
                     <svg
@@ -800,7 +848,7 @@ export default function ClassDetail({ classData, onBack }: Props) {
                   </div>
                   <p className="text-slate-500 font-medium">Belum ada jadwal</p>
                   <p className="text-slate-400 text-sm mt-1">
-                    Klik tombol Tambah Jadwal untuk memulai
+                    Pilih hari di atas untuk mulai menambahkan jadwal
                   </p>
                 </div>
               ) : (
@@ -810,17 +858,23 @@ export default function ClassDetail({ classData, onBack }: Props) {
                       key={day}
                       className="bg-white border border-slate-100 rounded-2xl overflow-hidden"
                     >
-                      {/* Day header */}
                       <div className="px-5 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
                         <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
                           {day}
                         </p>
-                        <span className="text-xs text-slate-400 bg-white px-2 py-0.5 rounded-md border border-slate-100">
-                          {scheduleByDay[day].length} sesi
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-400 bg-white px-2 py-0.5 rounded-md border border-slate-100">
+                            {scheduleByDay[day].length} sesi
+                          </span>
+                          <button
+                            onClick={() => openDayEditor(day)}
+                            className="text-xs text-indigo-500 hover:text-indigo-700 transition-colors font-medium"
+                          >
+                            + Tambah sesi
+                          </button>
+                        </div>
                       </div>
 
-                      {/* Sesi per hari */}
                       <div className="divide-y divide-slate-100">
                         {scheduleByDay[day].map((s) => (
                           <div
@@ -828,7 +882,6 @@ export default function ClassDetail({ classData, onBack }: Props) {
                             className="flex items-center justify-between px-5 py-3 group hover:bg-slate-50/50 transition-colors"
                           >
                             <div className="flex items-center gap-3">
-                              {/* Time badge */}
                               <div className="text-xs font-mono bg-indigo-50 text-indigo-700 px-2.5 py-1.5 rounded-lg whitespace-nowrap font-bold">
                                 {s.start_time.slice(0, 5)} –{" "}
                                 {s.end_time.slice(0, 5)}
@@ -881,7 +934,7 @@ export default function ClassDetail({ classData, onBack }: Props) {
                             <button
                               onClick={() => handleDeleteSchedule(s.id)}
                               className="text-slate-300 hover:text-red-500 transition-colors p-1 opacity-0 group-hover:opacity-100"
-                              aria-label="Hapus jadwal"
+                              aria-label="Hapus sesi"
                             >
                               <svg
                                 xmlns="http://www.w3.org/2000/svg"

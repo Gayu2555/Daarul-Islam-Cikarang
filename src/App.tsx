@@ -428,14 +428,14 @@ export default function App() {
         )}
       </main>
 
+      {/* PERBAIKAN: Props type dan onClose dikembalikan */}
       <Modal
         isOpen={isModalOpen}
-        type={modalType}
-        onClose={() => setIsModalOpen(false)}
+        type={modalType} // Ditambahkan kembali
+        onClose={() => setIsModalOpen(false)} // Ditambahkan kembali
         handleCreate={handleCreate}
         formData={formData}
         setFormData={setFormData}
-        students={students}
         subjects={subjects}
         teachers={teachers}
         classes={classes}
