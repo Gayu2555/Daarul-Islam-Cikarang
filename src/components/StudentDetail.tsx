@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 import type { Student, Grade, SPP } from "../types";
 
@@ -52,7 +52,8 @@ export default function StudentDetail({ student, onBack }: Props) {
   const avgScore =
     grades.length > 0
       ? Math.round(
-          grades.reduce((s, g) => s + g.grade_score, 0) / grades.length,
+          grades.reduce((s, g) => s + (g.grade_score as number), 0) /
+            grades.length,
         )
       : "-";
 
@@ -95,7 +96,7 @@ export default function StudentDetail({ student, onBack }: Props) {
         <div>
           <h2 className="text-xl font-bold text-slate-800">{student.name}</h2>
           <p className="text-sm text-slate-500">
-            NIS: {student.nis} · Kelas {student.class_name}
+            NIS: {student.nis} · Kelas {student.classes?.name ?? "-"}
           </p>
           <span className="inline-block mt-1 px-2.5 py-0.5 bg-emerald-50 text-emerald-700 text-xs font-medium rounded-full">
             Aktif
@@ -135,17 +136,18 @@ export default function StudentDetail({ student, onBack }: Props) {
       </div>
 
       {loading ? (
-        <div className="py-10 text-center text-slate-400 text-sm">
+        <div className="py-10 text-center text-slate-400 text-sm animate-pulse">
           Memuat data...
         </div>
       ) : (
         <>
+          {/* TAB: INFO */}
           {activeTab === "info" && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {[
                 { label: "Nama lengkap", value: student.name },
                 { label: "NIS", value: student.nis },
-                { label: "Kelas", value: student.class_name },
+                { label: "Kelas", value: student.classes?.name ?? "-" },
                 {
                   label: "Email orang tua",
                   value: student.parent_email || "-",
@@ -164,6 +166,7 @@ export default function StudentDetail({ student, onBack }: Props) {
             </div>
           )}
 
+          {/* TAB: GRADES */}
           {activeTab === "grades" && (
             <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden">
               {grades.length === 0 ? (
@@ -191,10 +194,10 @@ export default function StudentDetail({ student, onBack }: Props) {
                           {g.subjects?.name}
                         </td>
                         <td className="px-5 py-3 text-slate-500">
-                          {g.semester}
+                          {g.semester ?? "-"}
                         </td>
                         <td className="px-5 py-3 text-slate-500">
-                          {g.academic_year}
+                          {g.academic_year ?? "-"}
                         </td>
                         <td className="px-5 py-3 font-bold text-slate-800">
                           {g.grade_score}
@@ -202,12 +205,12 @@ export default function StudentDetail({ student, onBack }: Props) {
                         <td className="px-5 py-3">
                           <span
                             className={`px-2 py-0.5 rounded-full text-xs font-bold ${
-                              g.grade_score >= 70
+                              Number(g.grade_score) >= 70
                                 ? "bg-emerald-50 text-emerald-700"
                                 : "bg-red-50 text-red-600"
                             }`}
                           >
-                            {g.grade_score >= 70 ? "Lulus" : "Remedial"}
+                            {Number(g.grade_score) >= 70 ? "Lulus" : "Remedial"}
                           </span>
                         </td>
                       </tr>
@@ -218,6 +221,7 @@ export default function StudentDetail({ student, onBack }: Props) {
             </div>
           )}
 
+          {/* TAB: PAYMENTS */}
           {activeTab === "payments" && (
             <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden">
               {sppData.length === 0 ? (
@@ -228,6 +232,7 @@ export default function StudentDetail({ student, onBack }: Props) {
                 <table className="w-full text-left text-sm">
                   <thead>
                     <tr className="bg-slate-50 text-xs font-bold uppercase tracking-wider text-slate-500">
+                      <th className="px-5 py-3">Bulan</th>
                       <th className="px-5 py-3">Jatuh tempo</th>
                       <th className="px-5 py-3">Nominal</th>
                       <th className="px-5 py-3">Status</th>
@@ -239,7 +244,10 @@ export default function StudentDetail({ student, onBack }: Props) {
                         key={s.id}
                         className="hover:bg-slate-50/50 transition-colors"
                       >
-                        <td className="px-5 py-3 text-slate-600">
+                        <td className="px-5 py-3 text-slate-600 font-medium">
+                          {s.month}
+                        </td>
+                        <td className="px-5 py-3 text-slate-500">
                           {new Date(s.due_date).toLocaleDateString("id-ID", {
                             day: "numeric",
                             month: "long",
